@@ -352,6 +352,28 @@ const COL={malware:'#ef2b4b',phishing:'#9257e0',exploit:'#e3a81e'};
 const colOf=t=>COL[t]||'#8b9dc3';
 const HOME='MY';
 
+/* ---------- runtime config ------------------------------------------------
+   Two modes, one file:
+     live   - served by server.py, reads the proxied SSE feed (default)
+     replay - static host (GitHub Pages). Replays a real captured stream and
+              serves pre-baked country data. Injected by tools/build_static.py.
+   ?api=https://host overrides either, so the Pages build can point at a
+   backend and become genuinely live.                                        */
+const QS=new URLSearchParams(location.search);
+const CFG=Object.assign({mode:'live',base:'/static',api:'/api',captured:null},
+                        window.__CFG__||{});
+if(QS.get('api')){CFG.api=QS.get('api').replace(/\/$/,'');CFG.mode='live';}
+const P={
+  world:CFG.base+'/world.json', cov:CFG.base+'/coverage.json',
+  co:CFG.base+'/countries.json', dots:CFG.base+'/dots.json',
+  flag:cc=>CFG.base+'/flags/'+cc.toLowerCase()+'.svg',
+  topstats:CFG.mode==='replay'?CFG.base+'/data/topstats.json':CFG.api+'/topstats',
+  country:cc=>CFG.mode==='replay'?CFG.base+'/data/countries/'+cc.toUpperCase()+'.json'
+                                 :CFG.api+'/country/'+cc,
+  feed:CFG.base+'/data/feed.json', snap:CFG.base+'/data/stats.json',
+  stream:CFG.api+'/stream'
+};
+
 /* ---------- continent table ---------- */
 const CONTS={
  Africa:"DZ AO BJ BW BF BI CM CV CF TD KM CD CG CI DJ EG GQ ER SZ ET GA GM GH GN GW KE LS LR LY MG MW ML MR MU YT MA MZ NA NE NG RE RW SH ST SN SC SL SO ZA SS SD TZ TG TN UG EH ZM ZW",
@@ -605,14 +627,14 @@ $('#stage').addEventListener('click',e=>{
 /* ---------- country detail ---------- */
 async function openCountry(cc){
   selCC=cc; drawBase();
-  $('#dFlag').src='/static/flags/'+cc.toLowerCase()+'.svg';
+  $('#dFlag').src=P.flag(cc);
   $('#dName').textContent=CO[cc]?CO[cc].n:cc;
   $('#detail').classList.add('show');
   $('#dSrc').onclick=()=>{F.mode='src';F.countries=new Set([cc]);syncUI();apply();};
   $('#dDst').onclick=()=>{F.mode='dst';F.countries=new Set([cc]);syncUI();apply();};
   ['dL7','dA31','dWow','dPk'].forEach(i=>$('#'+i).textContent='—');
   $('#dChart').innerHTML='<div class="sub">Loading…</div>'; $('#dMix').innerHTML='';
-  let d=null; try{const r=await fetch('/api/country/'+cc); if(r.ok)d=await r.json();}catch(x){}
+  let d=null; try{const r=await fetch(P.country(cc)); if(r.ok)d=await r.json();}catch(x){}
   if(!d){$('#dChart').innerHTML='<div class="sub" style="color:var(--exploit)"><b>No sensor data.</b> '+
     'Check Point has no reporting gateways here, so this country can never appear in any ranking '+
     'on this map. That is a coverage gap, not an absence of attacks.</div>';return;}
@@ -670,7 +692,7 @@ function pushTicker(e){
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function updShown(){$('#sShown').textContent=nShown.toLocaleString();
   $('#sTotal').textContent=nTotal.toLocaleString();}
-function flag(cc){return `<img src="/static/flags/${cc.toLowerCase()}.svg" alt="" onerror="this.style.visibility='hidden'">`;}
+function flag(cc){return `<img src="${P.flag(cc)}" alt="" onerror="this.style.visibility='hidden'">`;}
 function renderLive(){
   const e=[...S.targets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6);
   $('#liveTargets').innerHTML = e.length
@@ -807,19 +829,21 @@ $('#rplus').onclick=()=>{ri=Math.min(RATES.length-1,ri+1);setRate();};
 /* ---------- boot ---------- */
 async function boot(){
   const [w,cov,co,dots]=await Promise.all([
-    fetch('/static/world.json').then(r=>r.json()),
-    fetch('/static/coverage.json').then(r=>r.json()),
-    fetch('/static/countries.json').then(r=>r.json()),
-    fetch('/static/dots.json').then(r=>r.json())]);
+    fetch(P.world).then(r=>r.json()),
+    fetch(P.cov).then(r=>r.json()),
+    fetch(P.co).then(r=>r.json()),
+    fetch(P.dots).then(r=>r.json())]);
   WORLD=w; CO=co; DOTS=dots; buildIndex();
   for(const [k,v] of Object.entries(cov)) if(v){COV[k]=v;REPORTING.push(k);}
   $('#qRep').textContent=`Only reporting (${REPORTING.length})`;
   buildFilterUI(); syncUI(); setRate(); resize();
   requestAnimationFrame(frame);
-  fetch('/api/topstats').then(r=>r.json()).then(renderTop).catch(()=>{});
+  fetch(P.topstats).then(r=>r.json()).then(renderTop).catch(()=>{});
   setInterval(renderLive,1200);
 
-  const es=new EventSource('/api/stream');
+  if(CFG.mode==='replay') return startReplay();
+
+  const es=new EventSource(P.stream);
   es.addEventListener('attack',e=>{try{onAttack(JSON.parse(e.data));}catch(x){}});
   es.addEventListener('stats',e=>{try{const s=JSON.parse(e.data);
     if(s.today)$('#today').textContent=s.today.toLocaleString();
@@ -828,6 +852,45 @@ async function boot(){
     $('#liveTxt').textContent=s.upstream?'LIVE':'RECONNECTING';}catch(x){}});
   es.onerror=()=>{$('#dot0').classList.add('off');$('#liveTxt').textContent='RECONNECTING';};
 }
+/* ---------- replay engine (static hosting) ---------------------------------
+   Loops a real captured stream at its original pacing. Every event is genuine
+   ThreatCloud data - signatures, coordinates, countries, provenance - it is
+   simply not arriving in real time. The UI says so rather than pretending.  */
+async function startReplay(){
+  let feed=[],snap={};
+  try{[feed,snap]=await Promise.all([
+    fetch(P.feed).then(r=>r.json()), fetch(P.snap).then(r=>r.json())]);}
+  catch(x){$('#liveTxt').textContent='NO DATA';$('#dot0').classList.add('off');return;}
+
+  const cap=snap.captured_at?new Date(snap.captured_at):null;
+  $('#liveTxt').textContent='REPLAY';
+  $('#dot0').style.background='#e3a81e';
+  $('#dot0').style.animation='none';
+  if(cap){
+    const el=document.createElement('div');
+    el.style.cssText='font-size:9px;color:#5a5866;letter-spacing:.04em;text-align:right';
+    el.textContent='captured '+cap.toISOString().slice(0,16).replace('T',' ')+' UTC';
+    document.querySelector('.hright').appendChild(el);
+  }
+  if(snap.daily) renderDaily(snap.daily);
+
+  let today=snap.today||0; const rate=snap.rate_counted||200;
+  if(today){$('#today').textContent=today.toLocaleString();
+    setInterval(()=>{today+=Math.round(rate);
+      $('#today').textContent=today.toLocaleString();},1000);}
+
+  if(!feed.length){$('#liveTxt').textContent='NO EVENTS';return;}
+  let i=0;
+  (function step(){
+    const e=feed[i], nx=feed[(i+1)%feed.length];
+    onAttack(e);
+    let dt=(i+1<feed.length)?(nx.t-e.t):900;
+    if(!(dt>=0)||dt>4000) dt=700;
+    i=(i+1)%feed.length;
+    setTimeout(step,Math.max(dt,25));
+  })();
+}
+
 boot();
 </script>
 </body>

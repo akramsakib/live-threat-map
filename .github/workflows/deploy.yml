@@ -1,0 +1,74 @@
+name: Refresh data and deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # every 2 hours - keeps the replayed stream and daily stats reasonably fresh
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds of live feed to capture"
+        required: false
+        default: "150"
+
+# one deploy at a time; let a running one finish so we never publish a half-build
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Capture live ThreatCloud feed
+        run: |
+          python3 tools/capture.py \
+            --seconds "${{ github.event.inputs.seconds || '150' }}" \
+            --out docs/data
+
+      - name: Build static site
+        run: python3 tools/build_static.py
+
+      - name: Sanity-check the build
+        run: |
+          set -e
+          test -s docs/index.html
+          test -s docs/data/feed.json
+          test -s docs/dots.json
+          python3 - <<'PY'
+          import json, sys
+          feed = json.load(open('docs/data/feed.json'))
+          stats = json.load(open('docs/data/stats.json'))
+          assert len(feed) > 20, f"only {len(feed)} events captured"
+          assert all('src' in e and 'dst' in e and 't' in e for e in feed)
+          print(f"OK: {len(feed)} events, captured {stats['captured_at']}, "
+                f"{stats['visible_pct']}% visible")
+          PY
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

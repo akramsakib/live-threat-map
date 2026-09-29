@@ -115,17 +115,55 @@ python3 probe.py   # re-probe all 171 countries → static/coverage.json
 
 ## Deploying
 
-**GitHub Pages will not work** — this needs a running Python process, not a
-static host. The backend is mandatory: Check Point's API is CORS-locked to
-their own origin, so the browser cannot read the feed directly.
+Two ways to run it, both free.
 
-Use GitHub for the code and a Python host for the app. Configs for Docker,
-Fly.io and Render are bundled. **See [DEPLOY.md](DEPLOY.md)** — including the
-one-instance rule and what to consider before putting it on a public URL.
+### 1. GitHub Pages (static, zero infrastructure)
+
+Live at **https://akramsakib.github.io/live-threat-map/**
+
+Pages cannot run Python, and Check Point's API is CORS-locked to their own
+origin — so the browser can never read the feed directly. The way round it:
+a GitHub Actions job captures a real slice of the feed **every 2 hours**,
+bakes it into `docs/`, and publishes.
+
+What that costs you is smaller than it sounds:
+
+| Part of the UI | On Pages |
+|---|---|
+| Country 31-day trends | **Real, refreshed every 2h** — this is daily data anyway |
+| Top countries / industries / malware types | **Real, refreshed every 2h** |
+| Coverage + blind spots | **Real** |
+| Day counter | Real at capture time, then ticks at the measured rate |
+| Animated arcs | **Real captured events**, replayed on loop at original pacing |
+
+Only the arc animation is time-shifted — and that is the part the original map
+samples down to ~1% anyway. The UI labels itself `REPLAY` with the capture
+timestamp rather than pretending.
 
 ```bash
-fly launch --copy-config --no-deploy && fly deploy   # recommended
+python3 tools/capture.py --seconds 150 --out docs/data   # grab real data
+python3 tools/build_static.py                            # assemble docs/
+cd docs && python3 -m http.server 4100                   # preview locally
 ```
+
+### 2. A real backend (genuinely live)
+
+For a true live stream you need a host that runs Python. `fly.toml` is
+preconfigured for Singapore with sleep disabled:
+
+```bash
+fly launch --copy-config --no-deploy && fly deploy
+```
+
+Then point the Pages build at it — no rebuild needed:
+
+```
+https://akramsakib.github.io/live-threat-map/?api=https://your-app.fly.dev/api
+```
+
+The `?api=` parameter switches the same page from replay to live. See
+[DEPLOY.md](DEPLOY.md) for Render, Docker, the one-instance rule, and what to
+consider before putting it on a public URL.
 
 ## Attribution
 

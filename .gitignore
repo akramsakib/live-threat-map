@@ -5,3 +5,6 @@ venv/
 .env
 .DS_Store
 country_cache.json
+
+# built by tools/build_static.py in CI
+docs/
