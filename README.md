@@ -110,3 +110,25 @@ python3 probe.py   # re-probe all 171 countries → static/coverage.json
 ```
 
 `HOME` near the top of the client script sets the pink home country (`MY`).
+
+---
+
+## Deploying
+
+**GitHub Pages will not work** — this needs a running Python process, not a
+static host. The backend is mandatory: Check Point's API is CORS-locked to
+their own origin, so the browser cannot read the feed directly.
+
+Use GitHub for the code and a Python host for the app. Configs for Docker,
+Fly.io and Render are bundled. **See [DEPLOY.md](DEPLOY.md)** — including the
+one-instance rule and what to consider before putting it on a public URL.
+
+```bash
+fly launch --copy-config --no-deploy && fly deploy   # recommended
+```
+
+## Attribution
+
+Live data comes from **Check Point ThreatCloud** via an undocumented public
+endpoint. This project is an independent client — not affiliated with or
+endorsed by Check Point Software Technologies.
