@@ -1,0 +1,15 @@
+# Render blueprint - https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: live-threat-map
+    runtime: python
+    plan: free
+    # IMPORTANT: keep this at 1. Each instance opens its own upstream
+    # connection to Check Point's feed.
+    numInstances: 1
+    buildCommand: "echo 'no build step - stdlib only'"
+    startCommand: "python3 server.py"
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
