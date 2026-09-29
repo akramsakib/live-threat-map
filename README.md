@@ -15,6 +15,25 @@ to rebuild after a restart.
 
 ---
 
+## Understanding what you're seeing
+
+Signature names from ThreatCloud are terse and vendor-specific — "Realtek Jungle
+SDK Command Injection" means nothing to most people. So:
+
+- **Click any attack in the live list** for a plain-English panel: what the
+  attack actually does, whether it deserves attention, severity, repeat count,
+  and a link to the NVD entry when the name carries a CVE.
+- **The `?` button in the header** opens a glossary: what Malware / Phishing /
+  Exploit mean, why most of this traffic is automated background noise, what
+  "origin unknown" and "domestic" tags mean, why grey countries are unmeasured
+  rather than safe, and why the country numbers are a *rate per organisation*
+  rather than a total.
+
+A 31-rule knowledge base classifies **98% of observed events** into families
+(EternalBlue, config/secret hunting, SSRF, reverse shell, botnet, infostealer,
+AI-agent tooling…). Anything unmatched falls back to an honest "this is a
+vendor-internal label and the public feed carries no payload detail".
+
 ## Filters
 
 Open with the **FILTERS** button (top right). Active filters appear as removable
@@ -26,7 +45,7 @@ chips over the map, and the badge counts how many are on.
 | **Attack type** | Malware / Phishing / Exploit. Also togglable straight from the bottom legend. |
 | **Country role** | `EITHER END` · `SOURCE ONLY` · `TARGET ONLY` — governs both country and region pickers. |
 | **Region** | Africa, Asia, Europe, N. America, S. America, Oceania. |
-| **Countries** | All 245, searchable, with flags. Each row shows its weekly rate or `NO DATA`. |
+| **Countries** | All 245, searchable, with flags. Each row shows its weekly rate, plus a live count of how many events it has in the current session. Countries with none are dimmed. |
 | Presets | Select all · Clear · Only reporting (87) · Malaysia · SE Asia |
 | **Skip circular** | Hides attacks whose source country equals the target. |
 | **Hide unknown origins** | Drops events whose source is a geolocation placeholder. |

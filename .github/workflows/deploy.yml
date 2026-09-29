@@ -11,7 +11,7 @@ on:
       seconds:
         description: "Seconds of live feed to capture"
         required: false
-        default: "150"
+        default: "300"
 
 # one deploy at a time; let a running one finish so we never publish a half-build
 concurrency:
@@ -36,8 +36,10 @@ jobs:
       - name: Capture live ThreatCloud feed
         run: |
           python3 tools/capture.py \
-            --seconds "${{ github.event.inputs.seconds || '150' }}" \
-            --out docs/data
+            --seconds "${{ github.event.inputs.seconds || '300' }}" \
+            --out docs/data \
+            --merge-url "https://akramsakib.github.io/live-threat-map/data/feed.json" \
+            --cap 2000
 
       - name: Build static site
         run: python3 tools/build_static.py

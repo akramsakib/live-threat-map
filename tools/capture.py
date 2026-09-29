@@ -104,10 +104,75 @@ def capture_feed(seconds):
     return events, counters
 
 
+
+def merge_feeds(old, new, cap):
+    """Accumulate captures so country coverage grows over time.
+
+    A single window only ever contains a few dozen countries, which makes the
+    country filter look broken. Merging successive runs fixes that - but a
+    naive FIFO would just fill up with the US and Brazil, which dominate every
+    window. So when trimming we drop events from the most over-represented
+    countries first, preserving rare ones.
+    """
+    for i, e in enumerate(old):
+        e["_b"] = e.get("_b", 0)
+    for e in new:
+        e["_b"] = 1_000_000
+    merged = old + new
+
+    if len(merged) > cap:
+        freq = Counter(e["dst"]["co"] for e in merged)
+        # walk from the most common country down, dropping its oldest events
+        drop = set()
+        need = len(merged) - cap
+        for cc, _ in freq.most_common():
+            if need <= 0:
+                break
+            idxs = [i for i, e in enumerate(merged)
+                    if e["dst"]["co"] == cc and i not in drop]
+            # never drop a country below 3 events - keeps the map varied
+            spare = max(0, len(idxs) - 3)
+            for i in idxs[:min(spare, need)]:
+                drop.add(i)
+                need -= 1
+        merged = [e for i, e in enumerate(merged) if i not in drop]
+        if len(merged) > cap:
+            merged = merged[-cap:]
+
+    # re-time: keep each batch's internal pacing, 800 ms between batches
+    gt, pb, pt = 0, None, None
+    for e in merged:
+        ot = e.get("t", 0)
+        if e["_b"] != pb or pt is None:
+            gap = 800 if pb is not None else 0
+        else:
+            gap = max(0, min(ot - pt, 4000))
+        gt += gap
+        pb, pt = e["_b"], ot
+        e["t"] = gt
+    for e in merged:
+        e.pop("_b", None)
+    return merged
+
+
+def fetch_old(url):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "capture.py"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read().decode())
+        return d if isinstance(d, list) else []
+    except Exception as e:
+        print(f"  (no previous feed to merge: {type(e).__name__})")
+        return []
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seconds", type=int, default=150)
+    ap.add_argument("--seconds", type=int, default=300)
     ap.add_argument("--out", default="docs/data")
+    ap.add_argument("--merge-url", default="",
+                    help="URL of a previously published feed.json to accumulate with")
+    ap.add_argument("--cap", type=int, default=2000,
+                    help="max events to keep after merging")
     a = ap.parse_args()
     out = a.out
     os.makedirs(os.path.join(out, "countries"), exist_ok=True)
@@ -151,6 +216,19 @@ def main():
             100 * sum(1 for e in events if e["circular"]) / len(events), 1),
         "types": Counter(e["type"] for e in events).most_common(),
     }
+
+    if a.merge_url:
+        old = fetch_old(a.merge_url)
+        before = len(set(e["dst"]["co"] for e in events) |
+                     set(e["src"]["co"] for e in events))
+        events = merge_feeds(old, events, a.cap)
+        after = len(set(e["dst"]["co"] for e in events) |
+                    set(e["src"]["co"] for e in events))
+        print(f"  merged with {len(old)} previous -> {len(events)} events, "
+              f"countries {before} -> {after}")
+        stats["events"] = len(events)
+        stats["countries"] = after
+        stats["merged"] = True
 
     json.dump(events, open(f"{out}/feed.json", "w"), separators=(",", ":"))
     json.dump(stats, open(f"{out}/stats.json", "w"), indent=1)
