@@ -1,23 +1,39 @@
 # Deploying
 
-## Read this first: GitHub Pages will not work
+## Two deployment models
 
-This is **not a static site.** GitHub Pages, Netlify Drop, Cloudflare Pages and
-friends serve files only — they cannot run `server.py`, and without it the map
-is a blank world with no data.
+This repo supports both. Pick based on whether you need *genuinely* live arcs.
 
-The backend is mandatory, not a convenience:
+### A. GitHub Pages — static, free, zero infrastructure
 
-1. **CORS.** Check Point sets
-   `Access-Control-Allow-Origin: https://threatmap.checkpoint.com`. A browser on
-   *your* domain is refused. Something server-side has to fetch the feed.
-2. **Connection fan-out.** One upstream SSE connection is shared by every
-   visitor. Without it, 50 visitors = 50 connections to Check Point.
-3. **Warm state.** Rolling stats live server-side so a new tab isn't blank.
+**Live: https://akramsakib.github.io/live-threat-map/**
 
-So: **GitHub for the code, a Python host for the running app.** Both are free.
+Pages cannot run Python, and Check Point sets
+`Access-Control-Allow-Origin: https://threatmap.checkpoint.com`, so a browser
+on your domain is refused. The workaround is to move the fetch off the browser
+and into CI: `.github/workflows/deploy.yml` captures a real slice of the feed
+**every 2 hours**, bakes it into `docs/`, and publishes.
 
----
+Country trends, rankings and coverage are daily data, so they lose nothing.
+Only the arc animation is time-shifted — replayed on loop at its original
+pacing — and the UI labels itself `REPLAY` with the capture timestamp instead
+of pretending. Nothing is synthetic; every event is a real ThreatCloud
+detection.
+
+Already configured. Nothing to do but push.
+
+### B. A Python host — genuinely live
+
+Needed if you want real-time arcs and per-visitor fan-out. The backend exists
+for three reasons: it works around the CORS lock, it shares **one** upstream
+connection across all visitors, and it keeps rolling stats warm so a new tab
+is not blank.
+
+Once deployed, the same Pages build can point at it — no rebuild:
+
+```
+https://akramsakib.github.io/live-threat-map/?api=https://your-app.fly.dev/api
+```
 
 ## Recommended: Fly.io
 
